@@ -15,7 +15,7 @@ use App\Http\Controllers\TelegramController;
 |
 */
 Route::get('/', function() {
-   Telegram::setWebhook(['url' => 'https://83e9-109-254-41-76.ngrok-free.app/webhook']);
+   Telegram::setWebhook(['url' => 'https://f3a2-109-254-41-76.ngrok-free.app/webhook']);
 
 return view('welcome');
 });

@@ -7,6 +7,7 @@ use Telegram\Bot\Keyboard\Keyboard;
 use Telegram\Bot\FileUpload\InputFile;
 use Illuminate\Http\Request;
 use App\Models\Category;
+use App\Models\Chat;
 use App\Models\Product;
 use Illuminate\Support\Facades\Log;
 
@@ -14,20 +15,30 @@ class TelegramController extends Controller
 {
 
 
-    protected $step_back = '/start';
+    protected $step_back;
     protected $category;
 
-    public function load(Request $request)
+    public function load(Request $request, $back = false)
     {
+
+
+
         if (isset($request->callback_query)) {
             $this->buttonAction($request);
             return;
         } else {
-            Log::debug($request);
             $chat_id = $request->message['from']['id'];
-            if (isset($request->message['text'])) {
 
-                switch ($request->message['text']) {
+            if (isset($request->message['text'])) {
+                $message = $request->message['text'];
+                if ($back == true) {
+
+                    $mess = Chat::where('chat_id', $chat_id)->get();
+                    $message = $mess[0]['step_back'];
+                }
+                Log::debug( $message);
+
+                switch ($message) {
 
                     case '/start':
                         $this->start($chat_id);
@@ -35,10 +46,22 @@ class TelegramController extends Controller
 
                     case 'Категории':
                         $this->categories($chat_id);
+                        $this->step_back = '/start';
                         break;
 
                     case 'Ещё':
-                        $this->getProducts($this->category, $chat_id);
+                        $cat_id = Chat::select('category')->where('chat_id', $chat_id)->get();
+                        $cat_id = $cat_id[0]['category'];
+                        $this->getProducts(1, $chat_id);
+                        $this->step_back = 'Категории';
+                        $this->category = $cat_id;
+
+                        break;
+
+                    case 'Назад':
+                        $this->load($request, true);
+                        break;
+
                     default:
                         // Проверяю есть ли такая категория
                         $name = $request->message['text'];
@@ -46,18 +69,30 @@ class TelegramController extends Controller
                         if (isset($cat)) {
                             $this->getProducts($cat->id,  $chat_id);
                             $this->category = $cat->id;
+                            $this->step_back = 'Категории';
+
                         } else {
+
                             Telegram::sendMessage([
                                 'chat_id' =>  $chat_id,
                                 'text' => 'Я не умею обрабатывать эту команду'
                             ]);
                         }
                 }
-                $this->step_back = $request->message['text'];
-            } else {
-                $this->step_back = '/start';
             }
+
+            $chat = Chat::firstOrCreate(
+                [
+                    'chat_id' => $chat_id
+                ]
+            );
+            $chat->step_back =  $this->step_back;
+            $chat->category =  $this->category;
+
+            $chat->save();
         }
+
+
     }
 
 
@@ -76,7 +111,7 @@ class TelegramController extends Controller
 
         Telegram::sendMessage([
             'chat_id' => $chat_id,
-            'text' => 'Выберите действие',
+            'text' => 'Выберите действие' . $this->step_back,
             'reply_markup' => $reply_markup
 
         ]);
@@ -90,7 +125,7 @@ class TelegramController extends Controller
         foreach ($category as &$value) {
             $keyboard[] = [$value->rus_name];
         }
-
+        $keyboard[] = ['Назад'];
         $reply_markup =  Keyboard::make([
             'keyboard' => $keyboard,
             'resize_keyboard' => true,
@@ -100,7 +135,7 @@ class TelegramController extends Controller
 
         Telegram::sendMessage([
             'chat_id' => $chat_id,
-            'text' => 'Выберите категорию',
+            'text' => 'Выберите категорию' ,
             'reply_markup' =>  $reply_markup
 
         ]);
@@ -109,7 +144,41 @@ class TelegramController extends Controller
 
     private function getProducts($category, $chat_id)
     {
-        $products = Product::where('category_id', $category)->orderBy('price')->paginate(10);
+
+
+        $keyboard = [
+            ['Ещё'],
+            ['Назад'],
+        ];
+
+        $reply_markup =  Keyboard::make([
+            'keyboard' => $keyboard,
+            'resize_keyboard' => true,
+            'one_time_keyboard' => true
+        ]);
+
+        Telegram::sendMessage([
+            'chat_id' => $chat_id,
+            'text' => 'Выберите действие',
+            'reply_markup' => $reply_markup
+
+        ]);
+
+        $products = Product::where('category_id', $category)->orderBy('price')->paginate(5)->withPath('');
+
+
+
+        $chat = Chat::firstOrCreate(
+            [
+                'chat_id' => $chat_id
+            ]
+        );
+        $chat->next_page =  2;
+
+        $chat->save();
+
+
+
         foreach ($products as &$item) {
 
             $file = InputFile::create('https://gauss-shop.ru/thumb/2/KvLZtMruC4v28F6NgnYIcg/350r350/d/no-image.jpg', 'test');
