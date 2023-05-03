@@ -11,6 +11,7 @@ use App\Models\Chat;
 use App\Models\Product;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Log;
+use Telegram\Bot\Methods\Payments;
 
 class TelegramController extends Controller
 {
@@ -23,11 +24,27 @@ class TelegramController extends Controller
     {
 
 
-
         if (isset($request->callback_query)) {
-            $this->buttonAction($request);
-            return;
-        } else {
+            $chat_id = $request->callback_query['from']['id'];
+            $product_id = $request->callback_query['data'];
+            $message_id = $request->callback_query['message']['message_id'];
+            $this->buttonAction($chat_id, $product_id);
+
+            $button = Keyboard::make()
+                ->inline()
+                ->row(
+                    [
+                        Keyboard::inlineButton(['text' => 'Nice 👍', 'callback_data' => 'Buy'])
+                    ]
+                );
+            Telegram::editMessageCaption( [
+                'chat_id' => $chat_id,
+                'reply_markup' => $button,
+                'message_id' => $message_id,
+                ]
+            );
+        }
+        else {
             $chat_id = $request->message['from']['id'];
 
             if (isset($request->message['text'])) {
@@ -37,7 +54,6 @@ class TelegramController extends Controller
                     $mess = Chat::where('chat_id', $chat_id)->get();
                     $message = $mess[0]['step_back'];
                 }
-                Log::debug($message);
 
                 switch ($message) {
 
@@ -55,13 +71,10 @@ class TelegramController extends Controller
                         $cat_id = $cat_id[0]['category'];
                         $page = Chat::select('next_page')->where('chat_id', $chat_id)->get();
                         $page = $page[0]['next_page'];
-                        if ($this->getProducts(1, $chat_id, $page) == true){
+                        if ($this->getProducts(1, $chat_id, $page) == true) {
                             $this->step_back = '/start';
-
-                        }
-                        else {
+                        } else {
                             $this->step_back = 'Категории';
-
                         }
 
 
@@ -180,11 +193,12 @@ class TelegramController extends Controller
         foreach ($products as &$item) {
 
             $file = InputFile::create('https://gauss-shop.ru/thumb/2/KvLZtMruC4v28F6NgnYIcg/350r350/d/no-image.jpg', 'test');
+
             $keyboard = Keyboard::make()
                 ->inline()
                 ->row(
                     [
-                        Keyboard::inlineButton(['text' => 'Купить', 'callback_data' => $item->id])
+                        Keyboard::inlineButton(['text' => 'Купить ' . $item->price . '₽', 'callback_data' => $item->id])
                     ]
                 );
             Telegram::sendPhoto([
@@ -224,8 +238,27 @@ class TelegramController extends Controller
 
 
 
-    private function buttonAction(Request $request)
+    private function buttonAction($chat_id, $product_id)
     {
-        return;
+
+        $item = Product::find($product_id);
+        Telegram::sendInvoice(
+            [
+                'chat_id'                        => $chat_id,  // int            - Required. Unique identifier for the target chat or username of the target channel (in the format "@channelusername")
+                'title'                          => $item->name,  // string         - Required. Product name, 1-32 characters
+                'description'                    => $item->desc,  // string         - Required. Product description, 1-255 characters
+                'payload'                        => $item->id,  // string         - Required. Bot-defined invoice payload, 1-128 bytes. This will not be displayed to the user, use for your internal processes.
+                'provider_token'                 => env('PSB_PAY'),  // string         - Required. Payments provider token, obtained via Botfather
+                'currency'                       => 'RUB',  // string         - Required. Three-letter ISO 4217 currency code
+                'prices'                         =>
+                [
+                    [
+                        'label' => $item->name,
+                        'amount' => $item->price
+                    ]
+                ],  // LabeledPrice[] - Required. Price breakdown, a list of components (e.g. product price, tax, discount, delivery cost, delivery tax, bonus, etc.)
+            ]
+
+        );
     }
 }
